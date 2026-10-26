@@ -20,6 +20,13 @@ if "scheduler" not in st.session_state:
 owner: Owner = st.session_state.owner
 scheduler: Scheduler = st.session_state.scheduler
 
+
+
+def when_text(task: Task) -> str:
+    """Return a task's start time as HH:MM, or "Anytime" when it has none."""
+    return task.due_time.strftime("%H:%M") if task.due_time else "Anytime"
+
+
 # One-shot success message that survives the st.rerun() after a form submit.
 if "flash" in st.session_state:
     st.success(st.session_state.pop("flash"))
@@ -125,25 +132,49 @@ if owner.pets:
 else:
     st.caption("Add a pet before creating tasks.")
 
-for pet_index, pet in enumerate(owner.pets):
-    st.markdown(f"**{pet.name}** ({pet.species}, age {pet.age})")
-    if not pet.tasks:
-        st.caption("No tasks yet.")
-    for task_index, task in enumerate(list(pet.tasks)):
-        c1, c2, c3 = st.columns([6, 2, 2])
-        when = task.due_time.strftime("%H:%M") if task.due_time else "any time"
-        label = (
-            f"{task.title} - {when}, {task.duration_minutes} min, "
-            f"{task.priority} ({task.frequency})"
+# View the task list using the Scheduler's filter and sort methods.
+if owner.pets:
+    fcol1, fcol2 = st.columns(2)
+    with fcol1:
+        pet_filter = st.selectbox("Filter by pet", ["All pets"] + [p.name for p in owner.pets])
+    with fcol2:
+        status_filter = st.selectbox("Filter by status", ["All", "Pending", "Completed"])
+    completed_filter = {"All": None, "Pending": False, "Completed": True}[status_filter]
+
+    # Conflicts among all pending tasks, reported as soon as they exist.
+    pending_conflicts = scheduler.conflict_warnings()
+    if pending_conflicts:
+        st.warning(
+            "Some pending tasks overlap in time. Consider rescheduling one of each pair:\n\n"
+            + "\n".join(f"- {w}" for w in pending_conflicts)
         )
-        c1.markdown(f"~~{label}~~ ✅" if task.completed else label)
-        key = f"{pet_index}_{task_index}"
-        if not task.completed and c2.button("Complete", key=f"done_{key}"):
-            pet.complete_task(task)
-            st.rerun()
-        if c3.button("Remove", key=f"remove_{key}"):
-            pet.remove_task(task)
-            st.rerun()
+
+    for pet in owner.pets:
+        if pet_filter != "All pets" and pet.name != pet_filter:
+            continue
+        st.markdown(f"**{pet.name}** ({pet.species}, age {pet.age})")
+        shown = scheduler.sort_by_time(
+            scheduler.filter_tasks(completed=completed_filter, pet_name=pet.name)
+        )
+        if not pet.tasks:
+            st.caption("No tasks yet.")
+        elif not shown:
+            st.caption("No tasks match this filter.")
+        for task in shown:
+            c1, c2, c3 = st.columns([6, 2, 2])
+            label = (
+                f"{when_text(task)} - {task.title}, {task.duration_minutes} min, "
+                f"{task.priority} ({task.frequency})"
+                + (f", {task.due_date}" if task.due_date else "")
+            )
+            c1.markdown(f"~~{label}~~ ✅" if task.completed else label)
+            key = f"{pet.name}_{id(task)}"
+            if not task.completed and c2.button("Complete", key=f"done_{key}"):
+                pet.complete_task(task)
+                st.rerun()
+            if c3.button("Remove", key=f"remove_{key}"):
+                pet.remove_task(task)
+                st.rerun()
 
 st.divider()
 
@@ -154,25 +185,46 @@ if st.button("Generate schedule"):
 
 if st.session_state.get("show_schedule"):
     st.markdown("### Today's Schedule")
-    plan = scheduler.generate_daily_plan()
+    plan = scheduler.sort_by_time(scheduler.generate_daily_plan())
     if not plan:
         st.info("Nothing to schedule. Add tasks (or all tasks are completed).")
     else:
         pet_of = {id(t): p.name for p in owner.pets for t in p.tasks}
-        st.table(
+        minutes = sum(t.duration_minutes for t in plan)
+        st.success(
+            f"{len(plan)} task(s) planned, {minutes} of "
+            f"{owner.available_minutes_per_day} available minutes."
+        )
+        st.dataframe(
             [
                 {
-                    "Time": t.due_time.strftime("%H:%M") if t.due_time else "Anytime",
+                    "Time": when_text(t),
                     "Pet": pet_of.get(id(t), "?"),
                     "Task": t.title,
-                    "Description": t.description,
                     "Duration (min)": t.duration_minutes,
                     "Priority": t.priority,
+                    "Status": "Done" if t.completed else "Pending",
                 }
                 for t in plan
-            ]
+            ],
+            hide_index=True,
         )
         for warning in scheduler.conflict_warnings(plan):
-            st.warning(f"Schedule conflict: {warning}")
-    with st.expander("Why this plan?", expanded=bool(plan)):
+            st.warning(
+                f"Overlap in today's plan: {warning}. "
+                "Consider rescheduling one of these tasks."
+            )
+    with st.expander("Why this plan?", expanded=False):
         st.text(scheduler.explain_plan())
+
+    done = scheduler.sort_by_time(scheduler.filter_tasks(completed=True))
+    if done:
+        with st.expander(f"Completed tasks ({len(done)})"):
+            pet_of = {id(t): p.name for p in owner.pets for t in p.tasks}
+            st.dataframe(
+                [
+                    {"Time": when_text(t), "Pet": pet_of.get(id(t), "?"), "Task": t.title}
+                    for t in done
+                ],
+                hide_index=True,
+            )
