@@ -6,12 +6,23 @@
 
 - Briefly describe your initial UML design.
 - What classes did you include, and what responsibilities did you assign to each?
+==
+My initial UML has four classes. Their relationships are shown in diagrams/uml.mmd and match the skeleton in pawpal_system.py.
+
+Task is a dataclass for one care activity. It holds a title, description, duration in minutes, priority, due time, frequency and a completed flag. It can mark itself complete, reschedule to a new time, and report whether it is due at a given moment.
+Pet is a dataclass for one animal, with a name, species, age and its own list of tasks. It adds and removes tasks and returns the ones not yet completed.
+Owner stores the owner's name, email, daily time budget (available_minutes_per_day) and a list of pets. It adds and removes pets, and get_all_tasks() gathers every task across all pets.
+Scheduler holds a reference to one Owner and contains the planning logic. It builds the daily plan, sorts tasks by time or priority, detects conflicts and explains the plan in readable text.
+The relationships are composition. An Owner has many Pets, and a Pet has many Tasks. The Scheduler depends on one Owner and works with that owner's Tasks. I kept data in Task, Pet and Owner and put the scheduling decisions in the Scheduler, so the algorithms can change without touching the data model. At this stage the methods are stubs, so the skeleton only defines structure.
 
 **b. Design changes**
 
 - Did your design change during implementation?
 - If yes, describe at least one change and why you made it.
+== 
+While reviewing the skeleton, I found two gaps. First, priority and frequency were free-form strings. sort_by_priority and is_due need known values, and a typo would silently break sorting. I [changed them to an enum / documented the allowed values] so the Scheduler can rank tasks reliably. Second, a Task didn't record which pet it belonged to, so a flat list from Owner.get_all_tasks() couldn't produce an explanation like "Walk for Buddy". I [added a pet_name field to Task / changed get_all_tasks() to return pet–task pairs] so the plan and conflict messages can name the pet. I also changed the detect_conflicts return type to list[tuple[Task, Task]] to make its output clearer.
 
+If you make no changes yet, you can write instead: "I reviewed the skeleton and identified a few improvements, such as constraining priority values and linking tasks to pets. I plan to make them when I implement the scheduling logic." Keep the real change description for when you actually make them.
 ---
 
 ## 2. Scheduling Logic and Tradeoffs
